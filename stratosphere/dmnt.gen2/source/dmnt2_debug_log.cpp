@@ -165,7 +165,7 @@ namespace ams::dmnt {
 
 namespace ams::dmnt {
 
-    //#define AMS_DMNT2_ENABLE_SD_CARD_DEBUG_LOG
+    #define AMS_DMNT2_ENABLE_SD_CARD_DEBUG_LOG
 
     #if defined(AMS_DMNT2_ENABLE_SD_CARD_DEBUG_LOG)
 
@@ -212,8 +212,12 @@ namespace ams::dmnt {
 
             std::va_list vl;
             va_start(vl, fmt);
-            util::VSNPrintf(buffer + prefix_len, sizeof(buffer) - prefix_len, fmt, vl);
+            util::VSNPrintf(buffer + prefix_len + 14, sizeof(buffer) - prefix_len - 14, fmt, vl);
             va_end(vl);
+            
+            char buffer2[15];
+            util::SNPrintf(buffer2, sizeof(buffer2), "%013ld ", os::GetSystemTick().GetInt64Value());
+            std::memcpy(buffer + prefix_len, buffer2, 14);
         }
 
         const auto len = std::strlen(buffer);
@@ -221,6 +225,11 @@ namespace ams::dmnt {
         std::scoped_lock lk(g_fs_mutex);
         R_ABORT_UNLESS(fs::WriteFile(g_debug_log_file, g_fs_offset, buffer, len, fs::WriteOption::Flush));
         g_fs_offset += len;
+
+        if(buffer[len - 1] != '\n') {
+            R_ABORT_UNLESS(fs::WriteFile(g_debug_log_file, g_fs_offset, "[...]\n", 6, fs::WriteOption::Flush));
+            g_fs_offset += 6;
+        }
     }
 
     #else
