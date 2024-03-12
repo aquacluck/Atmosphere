@@ -38,6 +38,7 @@ namespace ams::dmnt {
             char *m_reply_end{nullptr};
             char m_buffer[GdbPacketBufferSize / 2];
             bool m_killed{false};
+            bool m_supports_multiprocess{false};
             os::ThreadType m_events_thread;
             State m_state;
             DebugProcess m_debug_process;

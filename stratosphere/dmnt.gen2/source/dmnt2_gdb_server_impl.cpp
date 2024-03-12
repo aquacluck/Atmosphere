@@ -1000,7 +1000,11 @@ namespace ams::dmnt {
                                     AMS_DMNT2_GDB_LOG_DEBUG("BreakPoint %lx, addr=%lx, type=%s\n", thread_id, address, is_instr ? "Instr" : "Data");
 
                                     if (is_instr) {
-                                        AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:p%lx.%lx;hwbreak:;", static_cast<u32>(signal), m_process_id.value, thread_id);
+                                        if (m_supports_multiprocess) {
+                                            AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:p%lx.%lx;hwbreak:;", static_cast<u32>(signal), m_process_id.value, thread_id);
+                                        } else {
+                                            AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:%lx;hwbreak:;", static_cast<u32>(signal), thread_id);
+                                        }
                                     } else {
                                         bool read = false, write = false;
                                         const char *type = "watch";
@@ -1014,7 +1018,11 @@ namespace ams::dmnt {
                                             AMS_DMNT2_GDB_LOG_DEBUG("GetWatchPointInfo FAIL %lx, addr=%lx, type=%s\n", thread_id, address, is_instr ? "Instr" : "Data");
                                         }
 
-                                        AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:p%lx.%lx;%s:%lx;", static_cast<u32>(signal), m_process_id.value, thread_id, type, address);
+                                        if (m_supports_multiprocess) {
+                                            AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:p%lx.%lx;%s:%lx;", static_cast<u32>(signal), m_process_id.value, thread_id, type, address);
+                                        } else {
+                                            AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:%lx;%s:%lx;", static_cast<u32>(signal), thread_id, type, address);
+                                        }
                                     }
                                 }
                                 break;
@@ -1169,7 +1177,11 @@ namespace ams::dmnt {
                                     }
 
                                     if (signal == GdbSignal_BreakpointTrap && !is_new_hb_nro) {
-                                        AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:p%lx.%lx;swbreak:;", static_cast<u32>(signal), m_process_id.value, thread_id);
+                                        if (m_supports_multiprocess) {
+                                            AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:p%lx.%lx;swbreak:;", static_cast<u32>(signal), m_process_id.value, thread_id);
+                                        } else {
+                                            AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:%lx;swbreak:;", static_cast<u32>(signal), thread_id);
+                                        }
                                     }
 
                                     m_debug_process.ClearStep();
@@ -1182,7 +1194,11 @@ namespace ams::dmnt {
                         }
 
                         if (reply_cur == send_buffer) {
-                            AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:p%lx.%lx;", static_cast<u32>(signal), m_process_id.value, thread_id);
+                            if (m_supports_multiprocess) {
+                                AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:p%lx.%lx;", static_cast<u32>(signal), m_process_id.value, thread_id);
+                            } else {
+                                AppendReplyFormat(reply_cur, reply_end, "T%02Xthread:%lx;", static_cast<u32>(signal), thread_id);
+                            }
                         }
 
                         m_debug_process.SetLastThreadId(thread_id);
@@ -1276,7 +1292,11 @@ namespace ams::dmnt {
         }
 
         /* Add the thread id. */
-        AppendReplyFormat(m_reply_cur, m_reply_end, ";thread:p%lx.%lx", m_process_id.value, thread_id);
+        if (m_supports_multiprocess) {
+            AppendReplyFormat(m_reply_cur, m_reply_end, ";thread:p%lx.%lx", m_process_id.value, thread_id);
+        } else {
+            AppendReplyFormat(m_reply_cur, m_reply_end, ";thread:%lx", thread_id);
+        }
 
         /* Add the thread core. */
         {
@@ -1441,8 +1461,33 @@ namespace ams::dmnt {
     void GdbServerImpl::Hg() {
         bool success = false;
         s64 thread_id;
-        if (const char *dot = std::strchr(m_receive_packet, '.'); dot != nullptr) {
-            thread_id = std::strcmp(dot + 1, "-1") == 0 ? -1 : static_cast<s64>(DecodeHex(dot + 1));
+        if (m_supports_multiprocess) {
+            if (const char *dot = std::strchr(m_receive_packet, '.'); dot != nullptr) {
+                thread_id = std::strcmp(dot + 1, "-1") == 0 ? -1 : static_cast<s64>(DecodeHex(dot + 1));
+                AMS_DMNT2_GDB_LOG_DEBUG("Set thread id = %lx\n", thread_id);
+
+                u64 thread_ids[DebugProcess::ThreadCountMax];
+                s32 num_threads;
+                if (R_SUCCEEDED(m_debug_process.GetThreadList(std::addressof(num_threads), thread_ids, util::size(thread_ids)))) {
+                    if (thread_id == 0) {
+                        thread_id = thread_ids[0];
+                    }
+                    for (auto i = 0; i < num_threads; ++i) {
+                        if (thread_id == -1 || static_cast<u64>(thread_id) == thread_ids[i]) {
+                            svc::ThreadContext context;
+                            if (R_SUCCEEDED(m_debug_process.GetThreadContext(std::addressof(context), thread_ids[i], svc::ThreadContextFlag_Control))) {
+                                success = true;
+                                if (thread_id != -1) {
+                                    m_debug_process.SetThreadIdOverride(thread_ids[i]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        else {
+            thread_id = std::strcmp(m_receive_packet, "-1") == 0 ? -1 : static_cast<s64>(DecodeHex(m_receive_packet));
             AMS_DMNT2_GDB_LOG_DEBUG("Set thread id = %lx\n", thread_id);
 
             u64 thread_ids[DebugProcess::ThreadCountMax];
@@ -1569,8 +1614,24 @@ namespace ams::dmnt {
     }
 
     void GdbServerImpl::T() {
-        if (const char *dot = std::strchr(m_receive_packet, '.'); dot != nullptr) {
-            const u64 thread_id = DecodeHex(dot + 1);
+        if (m_supports_multiprocess) {
+            if (const char *dot = std::strchr(m_receive_packet, '.'); dot != nullptr) {
+                const u64 thread_id = DecodeHex(dot + 1);
+
+                svc::ThreadContext ctx;
+                if (R_SUCCEEDED(m_debug_process.GetThreadContext(std::addressof(ctx), thread_id, svc::ThreadContextFlag_Control))) {
+                    AppendReplyOk(m_reply_cur, m_reply_end);
+                } else {
+                    AMS_DMNT2_GDB_LOG_ERROR("Failed to get thread context");
+                    AppendReplyError(m_reply_cur, m_reply_end, "E01");
+                }
+            } else {
+                AMS_DMNT2_GDB_LOG_ERROR("'T' command formatted incorrectly (no '.'): %s\n", m_receive_packet);
+                AppendReplyError(m_reply_cur, m_reply_end, "E01");
+            }
+        }
+        else {
+            const u64 thread_id = DecodeHex(m_receive_packet);
 
             svc::ThreadContext ctx;
             if (R_SUCCEEDED(m_debug_process.GetThreadContext(std::addressof(ctx), thread_id, svc::ThreadContextFlag_Control))) {
@@ -1579,9 +1640,6 @@ namespace ams::dmnt {
                 AMS_DMNT2_GDB_LOG_ERROR("Failed to get thread context");
                 AppendReplyError(m_reply_cur, m_reply_end, "E01");
             }
-        } else {
-            AMS_DMNT2_GDB_LOG_ERROR("'T' command formatted incorrectly (no '.'): %s\n", m_receive_packet);
-            AppendReplyError(m_reply_cur, m_reply_end, "E01");
         }
     }
 
@@ -1896,9 +1954,15 @@ namespace ams::dmnt {
         if (token[0] && token[1]) {
             if (char *colon = std::strchr(token, ':'); colon != nullptr) {
                 *colon = 0;
-                if (char *dot = std::strchr(colon + 1, '.'); dot != nullptr) {
-                    *dot = 0;
-                    thread_id = std::strcmp(dot + 1, "-1") == 0 ? -1 : static_cast<s64>(DecodeHex(dot + 1));
+                if (m_supports_multiprocess) {
+                    if (char *dot = std::strchr(colon + 1, '.'); dot != nullptr) {
+                        *dot = 0;
+                        thread_id = std::strcmp(dot + 1, "-1") == 0 ? -1 : static_cast<s64>(DecodeHex(dot + 1));
+                        thread_ix = FindThreadIdIndex(thread_ids, num_threads, static_cast<u64>(thread_id));
+                    }
+                }
+                else {
+                    thread_id = std::strcmp(colon + 1, "-1") == 0 ? -1 : static_cast<s64>(DecodeHex(colon + 1));
                     thread_ix = FindThreadIdIndex(thread_ids, num_threads, static_cast<u64>(thread_id));
                 }
             }
@@ -1988,7 +2052,11 @@ namespace ams::dmnt {
     void GdbServerImpl::qC() {
         if (this->HasDebugProcess()) {
             /* Send the thread id. */
-            AppendReplyFormat(m_reply_cur, m_reply_end, "QCp%lx.%lx", m_process_id.value, m_debug_process.GetLastThreadId());
+            if (m_supports_multiprocess) {
+                AppendReplyFormat(m_reply_cur, m_reply_end, "QCp%lx.%lx", m_process_id.value, m_debug_process.GetLastThreadId());
+            } else {
+                AppendReplyFormat(m_reply_cur, m_reply_end, "QC%lx", m_debug_process.GetLastThreadId());
+            }
         } else {
             AMS_DMNT2_GDB_LOG_ERROR("Not attached\n");
             AppendReplyError(m_reply_cur, m_reply_end, "E01");
@@ -2173,11 +2241,34 @@ namespace ams::dmnt {
     }
 
     void GdbServerImpl::qSupported() {
+        /* Reset configuration */
+        m_supports_multiprocess = false;
+
         /* Current string from devkita64-none-elf-gdb: */
         /* qSupported:multiprocess+;swbreak+;hwbreak+;qRelocInsn+;fork-events+;vfork-events+;exec-events+;vContSupported+;QThreadEvents+;no-resumed+ */
 
         AppendReplyFormat(m_reply_cur, m_reply_end, "PacketSize=%lx", GdbPacketBufferSize - 1);
-        AppendReplyFormat(m_reply_cur, m_reply_end, ";multiprocess+");
+
+        /* We want to parse semicolon separated fields repeatedly. */
+        char *saved;
+        char *token = strtok_r(m_receive_packet, ";", std::addressof(saved));
+
+        /* Validate the initial token. */
+        if (token == nullptr) {
+            return;
+        }
+
+        /* Handle each token. */
+        while (token != nullptr) {
+            if(std::strcmp("multiprocess+", token) == 0) {
+                m_supports_multiprocess = true;
+                AppendReplyFormat(m_reply_cur, m_reply_end, ";multiprocess+");
+            } else {
+                AMS_DMNT2_GDB_LOG_INFO("Not Implemented qSupported: %s\n", token);
+            }
+            token = strtok_r(nullptr, ";", std::addressof(saved));
+        }
+
         AppendReplyFormat(m_reply_cur, m_reply_end, ";qXfer:osdata:read+");
         AppendReplyFormat(m_reply_cur, m_reply_end, ";qXfer:features:read+");
         AppendReplyFormat(m_reply_cur, m_reply_end, ";qXfer:libraries:read+");
@@ -2355,7 +2446,7 @@ namespace ams::dmnt {
                             R_ABORT_UNLESS(svc::GetDebugEvent(std::addressof(d), handle));
                             AMS_ABORT_UNLESS(d.type == svc::DebugEvent_CreateProcess);
 
-                            AppendReplyFormat(dst_cur, dst_end, "<item>\n<column name=\"pid\">%lu</column>\n<column name=\"command\">%s</column>\n</item>\n", d.info.create_process.process_id, d.info.create_process.name);
+                            AppendReplyFormat(dst_cur, dst_end, "<item>\n<column name=\"pid\">%lu</column>\n<column name=\"user\">root</column>\n<column name=\"command\">%s</column>\n<column name=\"cores\">0,1,2</column>\n</item>\n", d.info.create_process.process_id, d.info.create_process.name);
                         }
                     }
                 }
@@ -2444,7 +2535,11 @@ namespace ams::dmnt {
                     }
 
                     /* Set the thread entry */
-                    AppendReplyFormat(dst_cur, dst_end, "<thread id=\"p%lx.%lx\" core=\"%u\" name=\"%s\" />", m_process_id.value, thread_ids[i], core, sanitized);
+                    if (m_supports_multiprocess) {
+                        AppendReplyFormat(dst_cur, dst_end, "<thread id=\"p%lx.%lx\" core=\"%u\" name=\"%s\" />", m_process_id.value, thread_ids[i], core, sanitized);
+                    } else {
+                        AppendReplyFormat(dst_cur, dst_end, "<thread id=\"%lx\" core=\"%u\" name=\"%s\" />", thread_ids[i], core, sanitized);
+                    }
                 }
             }
 

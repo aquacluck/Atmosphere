@@ -409,7 +409,7 @@ namespace ams::ldr {
             }
 
             /* Set Enable ASLR. */
-            if (!(ldr_flags & CreateProcessFlag_DisableAslr)) {
+            if (!(ldr_flags & CreateProcessFlag_DisableAslr) && meta->aci->program_id.value != 0x0100000000010000) {
                 flags |= svc::CreateProcessFlag_EnableAslr;
             }
 
@@ -521,6 +521,8 @@ namespace ams::ldr {
             std::memset(out->nso_address, 0, sizeof(out->nso_address));
             std::memset(out->nso_size, 0, sizeof(out->nso_size));
 
+            bool is_smo = out_param->program_id == 0x0100000000010000;
+
             size_t total_size = 0;
             bool argument_allocated = false;
 
@@ -536,7 +538,17 @@ namespace ams::ldr {
                     out->nso_size[i] = std::max(out->nso_size[i], rw_end);
                     out->nso_size[i] += static_cast<size_t>(nso_headers[i].bss_size);
 
-                    const size_t aligned_up_size = util::AlignUp(out->nso_size[i], os::MemoryPageSize) & (AutoLoadModuleSizeMax - 1);
+                    bool is_smo_main = i==0;
+                    is_smo_main &= out_param->program_id == 0x0100000000010000;
+
+                    size_t aligned_one;
+                    if(is_smo && i==0) {
+                        aligned_one = util::AlignUp(out->nso_size[i], os::MemoryBlockUnitSize);
+                    } else {
+                        aligned_one = util::AlignUp(out->nso_size[i], os::MemoryPageSize);
+                    }
+
+                    const size_t aligned_up_size = aligned_one & (AutoLoadModuleSizeMax - 1);
                     R_UNLESS(out->nso_size[i] <= aligned_up_size, ldr::ResultInvalidNso());
                     R_UNLESS(aligned_up_size > 0,                 ldr::ResultInvalidNso());
 
@@ -594,6 +606,8 @@ namespace ams::ldr {
             size_t free_size     = (aslr_size - total_size);
             if (out_param->flags & svc::CreateProcessFlag_EnableAslr) {
                 aslr_slide = GenerateSecureRandom(free_size / os::MemoryBlockUnitSize) * os::MemoryBlockUnitSize;
+            } else if (is_smo) {
+                aslr_slide = 0x7100000000 - 0x0008200000;
             }
 
             /* Set out. */

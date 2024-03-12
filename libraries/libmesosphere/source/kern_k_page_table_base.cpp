@@ -312,6 +312,7 @@ namespace ams::kern {
                 if (m_enable_aslr) {
                     /* Generate the aslr offsets. */
                     for (size_t i = 0; i < cur_alloc_count; ++i) {
+                        // doing randomness for other segments here
                         aslr_offsets[i] = KSystemControl::GenerateRandomRange(0, alloc_sizes[cur_alloc_index] / RegionAlignment) * RegionAlignment;
                     }
 
