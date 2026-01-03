@@ -109,6 +109,7 @@ dist-no-debug: package3 $(CURRENT_DIRECTORY)/$(ATMOSPHERE_OUT_DIR)
 	cp stratosphere/memlet/$(ATMOSPHERE_OUT_DIR)/memlet.nsp $(DIST_DIR)/stratosphere_romfs/atmosphere/contents/0100000000000421/exefs.nsp
 	@PATH="$(DEVKITPRO)/tools/bin:$$PATH" build_romfs $(DIST_DIR)/stratosphere_romfs $(DIST_DIR)/atmosphere/stratosphere.romfs
 	rm -r $(DIST_DIR)/stratosphere_romfs
+	cp mesosphere/$(ATMOSPHERE_OUT_DIR)/mesosphere.bin $(CURRENT_DIRECTORY)/$(ATMOSPHERE_OUT_DIR)/mesosphere.bin
 	cp troposphere/reboot_to_payload/reboot_to_payload.nro $(DIST_DIR)/switch/reboot_to_payload.nro
 	cp troposphere/daybreak/daybreak.nro $(DIST_DIR)/switch/daybreak.nro
 	cp troposphere/haze/haze.nro $(DIST_DIR)/switch/haze.nro
