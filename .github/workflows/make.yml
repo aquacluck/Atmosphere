@@ -1,0 +1,44 @@
+name: Build Atmosphere
+
+on:
+  push:
+    branches:
+    - aquahax
+  workflow_dispatch:
+
+jobs:
+  Compile:
+    runs-on: ubuntu-24.04
+    container: devkitpro/devkita64:latest # debian + dkp-pacman image
+
+    steps:
+    - name: install deps
+      run: |
+        # github releaser
+        wget -q https://github.com/cli/cli/releases/download/v2.54.0/gh_2.54.0_linux_amd64.tar.gz
+        tar xf gh_2.54.0_linux_amd64.tar.gz
+        mv ./gh_2.54.0_linux_amd64/bin/gh /__w/gh # idk
+        rm -rf ./gh_2.54.0_linux_amd64 gh_2.54.0_linux_amd64.tar.gz
+        git config --global --add safe.directory /__w/Atmosphere/Atmosphere
+        # ams deps (already installed for this image)
+        #sudo dkp-pacman -S --noconfirm switch-dev switch-glm switch-libjpeg-turbo devkitARM devkitarm-rules hactool
+        #sudo apt-get install -y python3-lz4 zip
+        # something in this image needs updating?
+        #sudo dkp-pacman -Syu --noconfirm
+        sudo apt-get update -y --quiet
+        sudo apt-get upgrade -y --quiet
+
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: '1'
+        ref: 'aquahax'
+
+    - name: Build
+      run: make
+
+    - name: Create Release
+      run: /__w/gh release create --target aquahax $(date +%Y-%m-%d)-${{ github.sha }} out/nintendo_nx_arm64_armv8a/release/atmosphere-*.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
